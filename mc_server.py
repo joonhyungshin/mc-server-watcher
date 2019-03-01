@@ -74,7 +74,7 @@ class MCServer:
         while True:
             line = ferr.readline()
             if line:
-                server_log = MCServerLog(line, 'stderr')
+                server_log = MCServerLog(line, 'stderr', self.server_log_re)
                 self.handle(server_log)
                 if server_log.fit_level(self.log_level):
                     sys.stderr.write(line)
