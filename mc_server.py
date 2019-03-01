@@ -23,6 +23,7 @@ class MCServerLog:
         self.source = source
         self.server_log = self.server_log_re.match(message)
         self.total_message = message
+        self.message = message
         self.level = 'UNKNOWN'
 
         if self.server_log:
@@ -113,7 +114,7 @@ class MCServer:
         return self.process.returncode
 
 
-def send_slack_message(message, channel, username='Slackbot'):
+def send_slack_message(message, channel, username='Minecraft'):
     payload = {
         'channel': channel,
         'username': username,
@@ -124,19 +125,36 @@ def send_slack_message(message, channel, username='Slackbot'):
     urlopen(req)
 
 
-def notify_user(server_log):
+server_name = ''
+
+
+def handle(server_log):
     join_re = r'(?P<name>.+) joined the game$'
     left_re = r'(?P<name>.+) left the game$'
+    server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
+    done_re = r'Done.*'
 
-    if re.match(join_re, server_log.message) or re.match(left_re, server_log.message):
-        send_slack_message(server_log.message, '#api_test')
+    message = server_log.message
+
+    global server_name
+
+    if re.match(join_re, message) or re.match(left_re, message):
+        send_slack_message(message + ' {}.'.format(server_name), '#minecraft')
+    elif re.match(server_re, message):
+        match = re.match(server_re, message)
+        server_name = '{}:{}'.format(match.group('ip'), match.group('port'))
+    elif re.match(done_re, message):
+        send_slack_message('Server {} opened.'.format(server_name), '#minecraft')
 
 
 def main():
-    server = MCServer(sys.argv[1:], handle=notify_user)
+    server = MCServer(sys.argv[1:], handle=handle)
     server.start()
     while server.is_running():
         server.send_message(input())
+
+    global server_name
+    send_slack_message('Server {} closed.'.format(server_name), '#minecraft')
 
 
 if __name__ == '__main__':
