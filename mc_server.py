@@ -132,7 +132,7 @@ class MCServer:
             message += '\n'
         try:
             return fin.write(message)
-        except BrokenPipeError:
+        except (BrokenPipeError, OSError):
             return -1
 
     def is_running(self):
