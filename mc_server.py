@@ -4,7 +4,19 @@ from urllib.request import urlopen, Request
 import sys
 import re
 import json
+import configparser
 import os
+import shlex
+import time
+
+
+def send_slack_message(hook_url, message):
+    payload = {
+        'text': message
+    }
+    data = json.dumps(payload).encode()
+    req = Request(hook_url, data)
+    urlopen(req)
 
 
 class MCServerLog:
@@ -41,20 +53,36 @@ class MCServerLog:
 
 
 class MCServer:
-    def __init__(self, exec_args, executor='java', server_log_re=None, handle=None, log_level='INFO'):
-        self.exec_args = exec_args
-        self.executor = executor
-        if handle is None:
-            self.handle = lambda x: None
-        else:
-            self.handle = handle
-        self.process = None
+    def __init__(self, config, log_level='INFO'):
+        self.exec_args = shlex.split(config['Minecraft']['RunServerCommand'])
+        self.server_log_re = config['Minecraft']['ServerLogRegex']
+        self.server_name = config['Minecraft']['ServerName']
+        self.logout_cool_time = config['Minecraft']['LogoutCoolTime']
 
-        self.server_log_re = server_log_re
+        self.hook_url = config['SlackApp']['WebHookUrl']
+
+        self.process = None
 
         self.stdout_reader = None
         self.stderr_reader = None
         self.log_level = log_level
+
+    def handle_log(self, server_log):
+        join_re = r'(?P<name>.+) joined the game$'
+        left_re = r'(?P<name>.+) left the game$'
+        server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
+        done_re = r'Done.*'
+
+        message = server_log.message
+
+        if re.match(join_re, message) or re.match(left_re, message):
+            send_slack_message(self.hook_url, message + ' {}.'.format(self.server_name))
+        elif re.match(server_re, message):
+            match = re.match(server_re, message)
+            if not self.server_name:
+                self.server_name = '{}:{}'.format(match.group('ip'), match.group('port'))
+        elif re.match(done_re, message):
+            send_slack_message(self.hook_url, 'Server {} opened.'.format(self.server_name))
 
     def _read_stdout(self):
         fout = self.process.stdout
@@ -62,7 +90,7 @@ class MCServer:
             line = fout.readline()
             if line:
                 server_log = MCServerLog(line, 'stdout', self.server_log_re)
-                self.handle(server_log)
+                self.handle_log(server_log)
                 if server_log.fit_level(self.log_level):
                     sys.stdout.write(line)
 
@@ -75,7 +103,7 @@ class MCServer:
             line = ferr.readline()
             if line:
                 server_log = MCServerLog(line, 'stderr', self.server_log_re)
-                self.handle(server_log)
+                self.handle_log(server_log)
                 if server_log.fit_level(self.log_level):
                     sys.stderr.write(line)
 
@@ -83,7 +111,7 @@ class MCServer:
                 break
 
     def start(self):
-        self.process = Popen(args=[self.executor] + self.exec_args,
+        self.process = Popen(args=self.exec_args,
                              bufsize=1, stdin=PIPE, stdout=PIPE, stderr=PIPE, universal_newlines=True)
         self.stdout_reader = Thread(target=self._read_stdout)
         self.stderr_reader = Thread(target=self._read_stderr)
@@ -114,47 +142,36 @@ class MCServer:
         return self.process.returncode
 
 
-def send_slack_message(message, channel, username='Minecraft'):
-    payload = {
-        'channel': channel,
-        'username': username,
-        'text': message
-    }
-    data = json.dumps(payload).encode()
-    req = Request(os.environ['SLACK_HOOK_URL'], data)
-    urlopen(req)
-
-
-server_name = ''
-
-
-def handle(server_log):
+def handle(server_log, config):
     join_re = r'(?P<name>.+) joined the game$'
     left_re = r'(?P<name>.+) left the game$'
     server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
     done_re = r'Done.*'
 
     message = server_log.message
+    hook_url = config['SlackApp']['WebhookUrl']
 
     global server_name
 
     if re.match(join_re, message) or re.match(left_re, message):
-        send_slack_message(message + ' {}.'.format(server_name), '#minecraft')
+        send_slack_message(hook_url, message + ' {}.'.format(server_name))
     elif re.match(server_re, message):
         match = re.match(server_re, message)
         server_name = '{}:{}'.format(match.group('ip'), match.group('port'))
     elif re.match(done_re, message):
-        send_slack_message('Server {} opened.'.format(server_name), '#minecraft')
+        send_slack_message(hook_url, 'Server {} opened.'.format(server_name))
 
 
 def main():
-    server = MCServer(sys.argv[1:], handle=handle)
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    os.chdir(config['Minecraft']['GameDirectory'])
+    server = MCServer(config)
     server.start()
     while server.is_running():
         server.send_message(input())
 
-    global server_name
-    send_slack_message('Server {} closed.'.format(server_name), '#minecraft')
+    send_slack_message(server.hook_url, 'Server {} closed.'.format(server.server_name))
 
 
 if __name__ == '__main__':

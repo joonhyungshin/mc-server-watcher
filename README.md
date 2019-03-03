@@ -1,7 +1,11 @@
 # mc-server-watcher
 Minecraft server log watcher in Python 3
 
-Usage (Unix-like, BSD-like systems):
+Move `mc_server.py` together with `config.ini` to your Minecraft server directory.
+
+Add your Slack web hook URL to `config.ini`.
+
+Usage:
 ```
-$ SLACK_HOOK_URL=[Your hook url] python3 mc_server.py -jar -Xmx1024M -Xms1024m server.jar nogui
+$ python3 mc_server.py
 ```
