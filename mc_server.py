@@ -57,7 +57,8 @@ class MCServer:
         self.exec_args = shlex.split(config['Minecraft']['RunServerCommand'])
         self.server_log_re = config['Minecraft']['ServerLogRegex']
         self.server_name = config['Minecraft']['ServerName']
-        self.logout_cool_time = config['Minecraft']['LogoutCoolTime']
+        self.logout_cool_time = float(config['Minecraft']['LogoutCoolTime'])
+        self.save_cool_time = float(config['Minecraft']['SaveCoolTime'])
 
         self.hook_url = config['SlackApp']['WebHookUrl']
 
@@ -67,22 +68,55 @@ class MCServer:
         self.stderr_reader = None
         self.log_level = log_level
 
+        self.last_save = None
+        self.user_set = {}
+
+    def user_joined(self, user):
+        if user not in self.user_set:
+            self.user_set[user] = 0
+        self.user_set[user] += 1
+
+    def user_left(self, user):
+        if user in self.user_set:
+            self.user_set[user] -= 1
+            if self.user_set[user] == 0:
+                del self.user_set[user]
+
     def handle_log(self, server_log):
         join_re = r'(?P<name>.+) joined the game$'
         left_re = r'(?P<name>.+) left the game$'
         server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
+        save_re = r'Saving the game.*'
+        saved_re = r'Saved the game.*'
         done_re = r'Done.*'
 
         message = server_log.message
 
-        if re.match(join_re, message) or re.match(left_re, message):
-            send_slack_message(self.hook_url, message + ' {}.'.format(self.server_name))
+        if re.match(join_re, message):
+            match = re.match(join_re, message)
+            self.user_joined(match.group('name'))
+            send_slack_message(self.hook_url, message + ' `{}`.'.format(self.server_name))
+
+        elif re.match(left_re, message):
+            match = re.match(left_re, message)
+            self.user_left(match.group('name'))
+            send_slack_message(self.hook_url, message + ' `{}`.'.format(self.server_name))
+
+            if not self.user_set:
+                if self.last_save is None or time.time() - self.last_save >= self.save_cool_time:
+                    self.save_all()
+
         elif re.match(server_re, message):
             match = re.match(server_re, message)
             if not self.server_name:
                 self.server_name = '{}:{}'.format(match.group('ip'), match.group('port'))
+
         elif re.match(done_re, message):
-            send_slack_message(self.hook_url, 'Server {} opened.'.format(self.server_name))
+            send_slack_message(self.hook_url, 'Server `{}` opened.'.format(self.server_name))
+
+        elif re.match(save_re, message) or re.match(saved_re, message):
+            self.last_save = time.time()
+            send_slack_message(self.hook_url, message + ' `{}`.'.format(self.server_name))
 
     def _read_stdout(self):
         fout = self.process.stdout
@@ -134,6 +168,9 @@ class MCServer:
             return fin.write(message)
         except (BrokenPipeError, OSError):
             return -1
+
+    def save_all(self):
+        self.send_message('save-all flush')
 
     def is_running(self):
         return self.process.poll() is None
