@@ -86,8 +86,8 @@ class MCServer:
         join_re = r'(?P<name>.+) joined the game$'
         left_re = r'(?P<name>.+) left the game$'
         server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
-        save_re = r'Saving the game.*'
-        saved_re = r'Saved the game.*'
+        save_re = r'Saving.*'
+        saved_re = r'Saved.*'
         done_re = r'Done.*'
 
         message = server_log.message
