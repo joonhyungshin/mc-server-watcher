@@ -208,7 +208,7 @@ def main():
     while server.is_running():
         server.send_message(input())
 
-    send_slack_message(server.hook_url, 'Server {} closed.'.format(server.server_name))
+    send_slack_message(server.hook_url, 'Server `{}` closed.'.format(server.server_name))
 
 
 if __name__ == '__main__':
