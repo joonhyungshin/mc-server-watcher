@@ -71,6 +71,8 @@ class MCServer:
         self.last_save = None
         self.user_set = {}
 
+        self.stopping = False
+
     def user_joined(self, user):
         if user not in self.user_set:
             self.user_set[user] = 0
@@ -83,11 +85,15 @@ class MCServer:
                 del self.user_set[user]
 
     def handle_log(self, server_log):
+        if self.stopping:
+            return
+
         join_re = r'(?P<name>.+) joined the game$'
         left_re = r'(?P<name>.+) left the game$'
         server_re = r'Starting Minecraft server on (?P<ip>.+):(?P<port>[0-9]+)'
         save_re = r'Saving.*'
         saved_re = r'Saved.*'
+        stop_re = r'Stopping.*'
         done_re = r'Done.*'
 
         message = server_log.message
@@ -117,6 +123,10 @@ class MCServer:
         elif re.match(save_re, message) or re.match(saved_re, message):
             self.last_save = time.time()
             send_slack_message(self.hook_url, message + ' `{}`.'.format(self.server_name))
+
+        elif re.match(stop_re, message):
+            self.stopping = True
+            send_slack_message(self.hook_url, 'Server `{}` closed.'.format(self.server_name))
 
     def _read_stdout(self):
         fout = self.process.stdout
@@ -207,8 +217,6 @@ def main():
     server.start()
     while server.is_running():
         server.send_message(input())
-
-    send_slack_message(server.hook_url, 'Server `{}` closed.'.format(server.server_name))
 
 
 if __name__ == '__main__':
